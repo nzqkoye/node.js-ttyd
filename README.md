@@ -12,7 +12,7 @@
 
 
 容器启动命令：
-```chmod +x ttyd && ./ttyd -W -p 11320 bash```
+```chmod +x ttyd && ./ttyd -W -p 端口 -c 用户名:密码 bash```
 
 
 
