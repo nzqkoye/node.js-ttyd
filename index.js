@@ -11,7 +11,7 @@ const io = new Server(server, {
     transports: ['polling', 'websocket'] 
 });
 
-const port = process.env.SERVER_PORT || 11320;
+const port = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
     res.send(`
