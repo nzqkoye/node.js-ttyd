@@ -27,22 +27,26 @@ app.get('/', (req, res) => {
         <body>
             <div id="terminal"></div>
             <script>
-                const password = prompt("请输入访问密码:");
                 const socket = io({ transports: ['polling', 'websocket'] });
                 
-                socket.emit('auth', password);
-
-                socket.on('auth_result', (success) => {
-                    if (!success) {
-                        alert("密码错误！");
-                        window.location.reload();
-                        return;
-                    }
-                    const term = new Terminal({ theme: { background: '#1a1a1a' }, cursorBlink: true });
-                    term.open(document.getElementById('terminal'));
-                    
-                    term.onData(data => socket.emit('input', data));
-                    socket.on('output', data => term.write(data));
+                const term = new Terminal({ 
+                    theme: { background: '#1a1a1a' }, 
+                    cursorBlink: true,
+                    disableStdin: false
+                });
+                term.open(document.getElementById('terminal'));
+                term.focus();
+                
+                term.onData(data => {
+                    socket.emit('input', data);
+                });
+                
+                socket.on('output', data => {
+                    term.write(data);
+                });
+                
+                socket.on('connect', () => {
+                    console.log('Connected to terminal server');
                 });
             </script>
         </body>
@@ -53,39 +57,44 @@ app.get('/', (req, res) => {
 io.on('connection', (socket) => {
     let shell = null;
 
-    socket.on('auth', (password) => {
-        if (password !== '123456') {
-            socket.emit('auth_result', false);
-            return;
+    // 启动 bash shell，正确配置 stdio
+    shell = spawn('bash', [], {
+        env: Object.assign({}, process.env, { 
+            TERM: 'xterm-256color',
+            PS1: '\\u@\\h:\\w$ '
+        }),
+        cwd: '/app',
+        stdio: ['pipe', 'pipe', 'pipe']
+    });
+
+    shell.stdout.on('data', (data) => {
+        socket.emit('output', data.toString());
+    });
+
+    shell.stderr.on('data', (data) => {
+        socket.emit('output', data.toString());
+    });
+
+    socket.on('input', (data) => {
+        if (shell && shell.stdin.writable) {
+            shell.stdin.write(data);
         }
-        socket.emit('auth_result', true);
+    });
 
-        shell = spawn('sh', [], {
-            env: Object.assign({}, process.env, { TERM: 'xterm-256color' })
-        });
-
-        shell.stdout.on('data', (data) => {
-            socket.emit('output', data.toString());
-        });
-
-        shell.stderr.on('data', (data) => {
-            socket.emit('output', data.toString());
-        });
-
-        socket.on('input', (data) => {
-            if (shell && shell.stdin.writable) {
-                shell.stdin.write(data);
-            }
-        });
-
-        socket.on('disconnect', () => {
-            if (shell) {
-                shell.kill();
-            }
-        });
+    socket.on('disconnect', () => {
+        if (shell) {
+            shell.kill('SIGTERM');
+        }
+    });
+    
+    socket.on('error', (error) => {
+        console.error('Socket error:', error);
+        if (shell) {
+            shell.kill('SIGTERM');
+        }
     });
 });
 
 server.listen(port, '0.0.0.0', () => {
-    console.log(`纯 Node.js 轻量终端已成功启动，正在监听端口: ${port}`);
+    console.log(`纯 Node.js 轻量终端已成功启动，正在监听端口：${port}`);
 });
