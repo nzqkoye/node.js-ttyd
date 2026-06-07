@@ -26,8 +26,22 @@ app.get('/', (req, res) => {
   <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
   <script src="/socket.io/socket.io.js"></script>
   <style>
-    body { background: #1a1a1a; margin: 0; padding: 10px; }
-    #terminal { height: 95vh; }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    html, body {
+      height: 100%;
+      width: 100%;
+      background: #1a1a1a;
+      overflow: hidden;
+    }
+    #terminal {
+      height: 100vh;
+      width: 100vw;
+      padding: 10px;
+    }
     #status { 
       position: fixed; 
       top: 5px; 
@@ -38,6 +52,7 @@ app.get('/', (req, res) => {
       border-radius: 4px; 
       font-size: 12px;
       z-index: 1000;
+      opacity: 0.8;
     }
     .connected { background: #28a745; }
     .disconnected { background: #dc3545; }
@@ -56,23 +71,40 @@ app.get('/', (req, res) => {
     });
 
     const term = new Terminal({
-      theme: { background: '#1a1a1a' },
+      theme: { 
+        background: '#1a1a1a',
+        foreground: '#ffffff',
+        cursor: '#ffffff'
+      },
       cursorBlink: true,
       disableStdin: false,
       fontSize: 14,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace'
+      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      convertEol: true,
+      scrollback: 1000
     });
     
     term.open(document.getElementById('terminal'));
-    
-    // 强制聚焦
+    term.focus();
+
+    function fitTerminal() {
+      const dims = term._core._renderService._renderer.dimensions;
+      if (dims && dims.actualCellWidth && dims.actualCellHeight) {
+        const cols = Math.floor((window.innerWidth - 20) / dims.actualCellWidth);
+        const rows = Math.floor((window.innerHeight - 20) / dims.actualCellHeight);
+        if (cols > 0 && rows > 0) {
+          term.resize(cols, rows);
+        }
+      }
+    }
+
     setTimeout(() => {
+      fitTerminal();
       term.focus();
-      console.log('Terminal focused');
     }, 100);
 
-    // 点击终端时聚焦
-    document.getElementById('terminal').addEventListener('click', () => {
+    window.addEventListener('resize', () => {
+      fitTerminal();
       term.focus();
     });
 
@@ -99,12 +131,7 @@ app.get('/', (req, res) => {
     });
 
     term.onData((data) => {
-      console.log('Sending input:', JSON.stringify(data));
       socket.emit('input', data);
-    });
-
-    term.onKey((e) => {
-      console.log('Key pressed:', e.key);
     });
   </script>
 </body>
@@ -138,17 +165,17 @@ io.on('connection', (socket) => {
 
     shell.on('error', (err) => {
       console.error('Shell error:', err);
-      socket.emit('output', '\\r\\nShell error: ' + err.message + '\\r\\n');
+      socket.emit('output', '\r\nShell error: ' + err.message + '\r\n');
     });
 
     shell.on('exit', (code) => {
       console.log('Shell exited:', code);
-      socket.emit('output', '\\r\\n\\n[Process exited]\\r\\n');
+      socket.emit('output', '\r\n\r\n[Process exited]\r\n');
     });
 
   } catch (err) {
     console.error('Failed to spawn shell:', err);
-    socket.emit('output', '\\r\\nFailed to start shell: ' + err.message + '\\r\\n');
+    socket.emit('output', '\r\nFailed to start shell: ' + err.message + '\r\n');
   }
 
   socket.on('input', (data) => {
@@ -166,5 +193,5 @@ io.on('connection', (socket) => {
 });
 
 server.listen(port, '0.0.0.0', () => {
-  console.log(`Terminal server listening on port ${port}`);
+  console.log('Terminal server listening on port ' + port);
 });
