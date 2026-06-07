@@ -4,9 +4,9 @@
   "description": "Web Terminal for Wispbyte",
   "main": "index.js",
   "scripts": {
-  "start": "node index.js",
-  "build": "echo 'No build required'"
-},
+    "start": "node index.js",
+    "build": "echo 'No build required'"
+  },
   "engines": {
     "node": ">=18.0.0"
   },
