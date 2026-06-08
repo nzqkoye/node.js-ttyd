@@ -1,10 +1,10 @@
 {
-  "name": "wispbyte-terminal",
+  "name": "wispbyte-terminal"，
   "version": "1.0.0",
   "description": "Web Terminal for Wispbyte",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "node --max-old-space-size=48 index.js",
     "build": "npm install"
   },
   "engines": {
