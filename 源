@@ -2,20 +2,47 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const { spawn } = require('child_process');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
-
 const io = new Server(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  },
+  cors: { origin: "*", methods: ["GET", "POST"] },
   transports: ['websocket', 'polling']
 });
-
 const port = process.env.PORT || 3000;
 
+// 自动寻找系统可用的 Shell
+const getShell = () => {
+  if (fs.existsSync('/bin/bash')) return '/bin/bash';
+  if (fs.existsSync('/usr/bin/bash')) return '/usr/bin/bash';
+  return 'sh';
+};
+
+// ==================== 脚本保活守护进程逻辑 ====================
+let guardianProcess = null;
+function startGuardian() {
+  const shellCmd = getShell();
+  console.log('[Guardian] 使用 ' + shellCmd + ' 启动脚本...');
+  
+  const command = 'cd /tmp && vwpt="2086" uuid="4c1c82ca-3b98-493c-a619-2xxxxxxxxx1" cdnym="render-argo.xxxx.cloudns.be" argo="vwpt" agn="render-argo.xxxx.cloudns.be" agk="eyJhIxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx2IiwicyI6Ik9HVTNOakptWkRVdE5URmtNUzAwT0RkakxUaGxaak10TVRBME0yRmxNRFk0WkdKbSJ9" cfip="render-argo.xxxx.cloudns.be" bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)';
+
+  guardianProcess = spawn(shellCmd, ['-c', command], {
+    cwd: '/tmp',
+    env: process.env
+  });
+
+  guardianProcess.stdout.on('data', (data) => console.log('[Guardian]: ' + data.toString().trim()));
+  guardianProcess.stderr.on('data', (data) => console.error('[Guardian Error]: ' + data.toString().trim()));
+  
+  guardianProcess.on('close', (code) => {
+    console.log('[Guardian] 退出码 ' + code + '.10秒后重启...');
+    setTimeout(startGuardian, 10000);
+  });
+}
+setTimeout(startGuardian, 8000);
+
+// ==================== Web 界面 ====================
 app.get('/', (req, res) => {
   res.send(`
 <!DOCTYPE html>
@@ -26,34 +53,10 @@ app.get('/', (req, res) => {
   <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
   <script src="/socket.io/socket.io.js"></script>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    html, body {
-      height: 100%;
-      width: 100%;
-      background: #1a1a1a;
-      overflow: hidden;
-    }
-    #terminal {
-      height: 100vh;
-      width: 100vw;
-      padding: 10px;
-    }
-    #status { 
-      position: fixed; 
-      top: 5px; 
-      right: 10px; 
-      background: #333; 
-      color: #fff; 
-      padding: 5px 10px; 
-      border-radius: 4px; 
-      font-size: 12px;
-      z-index: 1000;
-      opacity: 0.8;
-    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; width: 100%; background: #1a1a1a; overflow: hidden; }
+    #terminal { height: 100vh; width: 100vw; padding: 10px; }
+    #status { position: fixed; top: 5px; right: 10px; background: #333; color: #fff; padding: 5px 10px; border-radius: 4px; font-size: 12px; z-index: 1000; opacity: 0.8; }
     .connected { background: #28a745; }
     .disconnected { background: #dc3545; }
   </style>
@@ -63,76 +66,15 @@ app.get('/', (req, res) => {
   <div id="terminal"></div>
   <script>
     const statusDiv = document.getElementById('status');
-    
-    const socket = io({
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 10
-    });
-
-    const term = new Terminal({
-      theme: { 
-        background: '#1a1a1a',
-        foreground: '#ffffff',
-        cursor: '#ffffff'
-      },
-      cursorBlink: true,
-      disableStdin: false,
-      fontSize: 14,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      convertEol: true,
-      scrollback: 1000
-    });
-    
+    const socket = io({ transports: ['websocket', 'polling'], reconnection: true });
+    const term = new Terminal({ theme: { background: '#1a1a1a' }, cursorBlink: true, convertEol: true });
     term.open(document.getElementById('terminal'));
     term.focus();
-
-    function fitTerminal() {
-      const dims = term._core._renderService._renderer.dimensions;
-      if (dims && dims.actualCellWidth && dims.actualCellHeight) {
-        const cols = Math.floor((window.innerWidth - 20) / dims.actualCellWidth);
-        const rows = Math.floor((window.innerHeight - 20) / dims.actualCellHeight);
-        if (cols > 0 && rows > 0) {
-          term.resize(cols, rows);
-        }
-      }
-    }
-
-    setTimeout(() => {
-      fitTerminal();
-      term.focus();
-    }, 100);
-
-    window.addEventListener('resize', () => {
-      fitTerminal();
-      term.focus();
-    });
-
-    socket.on('connect', () => {
-      statusDiv.textContent = 'Connected';
-      statusDiv.className = 'connected';
-      console.log('Socket connected');
-    });
-
-    socket.on('disconnect', () => {
-      statusDiv.textContent = 'Disconnected';
-      statusDiv.className = 'disconnected';
-      console.log('Socket disconnected');
-    });
-
-    socket.on('connect_error', (err) => {
-      statusDiv.textContent = 'Connection Error: ' + err.message;
-      statusDiv.className = 'disconnected';
-      console.error('Connection error:', err);
-    });
-
-    socket.on('output', (data) => {
-      term.write(data);
-    });
-
-    term.onData((data) => {
-      socket.emit('input', data);
-    });
+    window.addEventListener('resize', () => term.focus());
+    socket.on('connect', () => { statusDiv.textContent = 'Connected'; statusDiv.className = 'connected'; });
+    socket.on('disconnect', () => { statusDiv.textContent = 'Disconnected'; statusDiv.className = 'disconnected'; });
+    socket.on('output', (data) => term.write(data));
+    term.onData((data) => socket.emit('input', data));
   </script>
 </body>
 </html>
@@ -140,58 +82,17 @@ app.get('/', (req, res) => {
 });
 
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
-
-  let shell = null;
-
-  try {
-    shell = spawn('bash', ['-i'], {
-      env: {
-        ...process.env,
-        TERM: 'xterm-256color',
-        PS1: '\\u@\\h:\\w\\$ '
-      },
-      cwd: '/app',
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
-
-    shell.stdout.on('data', (data) => {
-      socket.emit('output', data.toString());
-    });
-
-    shell.stderr.on('data', (data) => {
-      socket.emit('output', data.toString());
-    });
-
-    shell.on('error', (err) => {
-      console.error('Shell error:', err);
-      socket.emit('output', '\r\nShell error: ' + err.message + '\r\n');
-    });
-
-    shell.on('exit', (code) => {
-      console.log('Shell exited:', code);
-      socket.emit('output', '\r\n\r\n[Process exited]\r\n');
-    });
-
-  } catch (err) {
-    console.error('Failed to spawn shell:', err);
-    socket.emit('output', '\r\nFailed to start shell: ' + err.message + '\r\n');
-  }
-
-  socket.on('input', (data) => {
-    if (shell && shell.stdin.writable) {
-      shell.stdin.write(data);
-    }
+  const shellCmd = getShell();
+  console.log('Client connected, spawning: ' + shellCmd);
+  const shell = spawn(shellCmd, ['-i'], {
+    env: { ...process.env, TERM: 'xterm-256color', PS1: '\\\\u@\\\\h:\\\\w\\\\$ ' },
+    cwd: process.cwd(),
+    stdio: ['pipe', 'pipe', 'pipe']
   });
-
-  socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
-    if (shell) {
-      shell.kill('SIGTERM');
-    }
-  });
+  shell.stdout.on('data', (data) => socket.emit('output', data.toString()));
+  shell.stderr.on('data', (data) => socket.emit('output', data.toString()));
+  socket.on('input', (data) => { if (shell.stdin.writable) shell.stdin.write(data); });
+  socket.on('disconnect', () => shell.kill());
 });
 
-server.listen(port, '0.0.0.0', () => {
-  console.log('Terminal server listening on port ' + port);
-});
+server.listen(port, '0.0.0.0', () => console.log('Server on port ' + port));
