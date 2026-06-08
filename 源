@@ -3,7 +3,6 @@ const http = require('http');
 const { Server } = require('socket.io');
 const { spawn } = require('child_process');
 const fs = require('fs');
-const path = require('fs');
 
 const app = express();
 const server = http.createServer(app);
@@ -11,7 +10,25 @@ const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] },
   transports: ['websocket', 'polling']
 });
-const port = process.env.PORT || 3000;
+
+// ==================== ⚙️ 全局自定义配置中心 (优先读取平台环境变量，平台无变量则读取此处默认配置) ====================
+const CONFIG = {
+  port: process.env.PORT || process.env.webPort || 3000,                            // 网页终端服务端口 (优先读取平台 PORT 或自定义 webPort 变量，无变量则默认 3000)
+  vwpt: process.env.vwpt || "2086",                                                 // 代理服务内部监听端口
+  uuid: process.env.uuid || "80axxxxxx822a-84caee677810",                           // 你的 UUID
+  cdnym: process.env.cdnym || "argo.nzqk.clxxx.be",                                 // 你的 CDN 域名
+  argo: process.env.argo || "vwpt",                                                 // Argo 运行模式
+  agn: process.env.agn || "argo.nzqk.cxxxs.be",                                     // Argo 隧道域名
+  agk: process.env.agk || "eyJhIjoiZjY3ZDMwNwWlRVdFl6aGtZUzAwT1RVeUxXSXlaR",        // Argo 隧道 Key
+  cfip: process.env.cfip || "argo.nzqk.cloudns.be",                                 // 优选 IP 域名
+  IP: process.env.IP || "127.0.0.1",                                                // 强制绑定本地 IP (防止被 Render 拦截)
+  scriptUrl: process.env.scriptUrl || "https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh", // 脚本下载地址
+  startDelay: process.env.startDelay ? parseInt(process.env.startDelay) : 15000,    // 守护进程延迟启动时间 (毫秒)
+  reconnectDelay: process.env.reconnectDelay ? parseInt(process.env.reconnectDelay) : 10000 // 守护进程重连延迟时间 (毫秒)
+};
+// ==================================================================================
+
+const port = CONFIG.port;
 
 // 自动寻找系统可用的 Shell
 const getShell = () => {
@@ -20,32 +37,44 @@ const getShell = () => {
   return 'sh';
 };
 
-// ==================== 脚本保活守护进程逻辑 ====================
-let guardianProcess = null;
+// ==================== 内存监控与保活守护 ====================
+function logMemory() {
+  const used = process.memoryUsage();
+  console.log('[System] 内存占用: RSS: ' + Math.round(used.rss / 1024 / 1024) + 'MB, Heap: ' + Math.round(used.heapUsed / 1024 / 1024) + 'MB');
+}
+setInterval(logMemory, 60000); // 每分钟在控制台打印一次内存情况
 
+let guardianProcess = null;
 function startGuardian() {
   const shellCmd = getShell();
-  console.log('[Guardian] 正在当前工作目录下启动保活脚本...');
+  console.log('[Guardian] 正在使用 ' + shellCmd + ' 启动保活脚本...');
 
-  // 1. 注入关键环境变量
-  // 特别注意：我们显式指定 IP 为 127.0.0.1,防止 xray 尝试绑定 0.0.0.0 被 Render 拦截
+  // 1. 动态生成环境变量对象 (全部读取 CONFIG)
   const envVars = {
     ...process.env,
-    vwpt: "2086",
-    uuid: "80axxxxxx822a-84caee677810",
-    cdnym: "galaxy-argo.nzqk.clxxx.be",
-    argo: "vwpt",
-    agn: "galaxy-argo.nzqk.cxxxs.be",
-    agk: "eyJhIjoiZjY3ZDMwNGRlODQ1YWE2YzliY2VkMTcwZjA1NjxxxxxxxxxxxmLTllYTgtNjY5MWM2YTliNDY4IiwicyI6Ik5UZzFORFUwWlRVdFl6aGtZUzAwT1RVeUxXSXlaR1V0T1Rjd1pHTTNZbUkyTkRkbSJ9",
-    cfip: "galaxy-argo.nzqk.cloudns.be",
-    IP: "127.0.0.1" // 强制 xray 绑定本地回环,绕过 Render 端口限制
+    vwpt: CONFIG.vwpt,
+    uuid: CONFIG.uuid,
+    cdnym: CONFIG.cdnym,
+    argo: CONFIG.argo,
+    agn: CONFIG.agn,
+    agk: CONFIG.agk,
+    cfip: CONFIG.cfip,
+    IP: CONFIG.IP
   };
 
-  // 2. 在当前工作目录下执行（当前目录在 Render 中拥有完整的 CPU 执行权限）
-  const command = 'vwpt="2086" uuid="80axxxxxx822a-84caee677810" cdnym="galaxy-argo.nzqk.clxxx.be" argo="vwpt" agn="galaxy-argo.nzqk.cxxxs.be" agk="eyJhIjoiZjY3ZDMwNGRlODQ1YWE2YzliY2VkMTcwZjA1NjxxxxxxxxxxxmLTllYTgtNjY5MWM2YTliNDY4IiwicyI6Ik5UZzFORFUwWlRVdFl6aGtZUzAwT1RVeUxXSXlaR1V0T1Rjd1pHTTNZbUkyTkRkbSJ9" cfip="galaxy-argo.nzqk.cloudns.be" IP="127.0.0.1" bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)';
+  // 2. 动态拼接执行命令 (全部读取 CONFIG，100% 免疫混淆和翻译干扰)
+  const command = 'vwpt="' + CONFIG.vwpt + '" ' +
+                  'uuid="' + CONFIG.uuid + '" ' +
+                  'cdnym="' + CONFIG.cdnym + '" ' +
+                  'argo="' + CONFIG.argo + '" ' +
+                  'agn="' + CONFIG.agn + '" ' +
+                  'agk="' + CONFIG.agk + '" ' +
+                  'cfip="' + CONFIG.cfip + '" ' +
+                  'IP="' + CONFIG.IP + '" ' +
+                  'bash <(curl -Ls ' + CONFIG.scriptUrl + ')';
 
   guardianProcess = spawn(shellCmd, ['-c', command], {
-    cwd: process.cwd(), // 切换回当前工作目录,解决 /tmp 的 noexec 限制
+    cwd: process.cwd(), // 切换回当前工作目录，解决 /tmp 的 noexec 限制
     env: envVars
   });
 
@@ -60,14 +89,14 @@ function startGuardian() {
   });
 
   guardianProcess.on('close', (code) => {
-    console.log('[Guardian] 脚本进程已退出,退出码: ' + code + '.将在 10 秒后重新启动...');
+    console.log('[Guardian] 脚本进程已退出，退出码: ' + code + '。将在 ' + (CONFIG.reconnectDelay / 1000) + ' 秒后重新启动...');
     guardianProcess = null;
-    setTimeout(startGuardian, 10000);
+    setTimeout(startGuardian, CONFIG.reconnectDelay);
   });
 }
 
-// 延迟 15 秒启动,给 Node.js 留出足够的空间先完成端口绑定和健康检查
-setTimeout(startGuardian, 15000);
+// 延迟启动守护进程
+setTimeout(startGuardian, CONFIG.startDelay);
 // ============================================================
 
 // ==================== 网页终端界面 ====================
@@ -125,7 +154,6 @@ app.get('/', (req, res) => {
 io.on('connection', (socket) => {
   const shellCmd = getShell();
   console.log('Client connected, spawning: ' + shellCmd);
-  
   let shell = null;
   try {
     shell = spawn(shellCmd, ['-i'], {
