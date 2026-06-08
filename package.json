@@ -4,7 +4,7 @@
   "description": "Web Terminal for Wispbyte",
   "main": "index.js",
   "scripts": {
-    "start": "mkdir -p /tmp/bin && ln -sf $(which bash || which sh) /tmp/bin/bash && PATH=/tmp/bin:$PATH node index.js",
+    "start": "node index.js",
     "build": "npm install"
   },
   "engines": {
