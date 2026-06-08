@@ -1,4 +1,5 @@
 # node.js-ttyd
 
-Build Command：npm install
-Start Command：npm start
+ ```
+ Build Command：npm install
+ Start Command：npm start
