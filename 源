@@ -11,22 +11,22 @@ const io = new Server(server, {
   transports: ['websocket', 'polling']
 });
 
-// ==================== ⚙️ 全局自定义配置中心 (优先读取平台环境变量，平台无变量则读取此处默认配置) ====================
+// ==================== ⚙️ 全局自定义配置中心 ====================
 const CONFIG = {
-  port: process.env.PORT || process.env.webPort || 3000,                            // 网页终端服务端口 (优先读取平台 PORT 或自定义 webPort 变量，无变量则默认 3000)
-  vwpt: process.env.vwpt || "2086",                                                 // 代理服务内部监听端口
-  uuid: process.env.uuid || "80axxxxxx822a-84caee677810",                           // 你的 UUID
-  cdnym: process.env.cdnym || "argo.nzqk.clxxx.be",                                 // 你的 CDN 域名
-  argo: process.env.argo || "vwpt",                                                 // Argo 运行模式
-  agn: process.env.agn || "argo.nzqk.cxxxs.be",                                     // Argo 隧道域名
-  agk: process.env.agk || "eyJhIjoiZjY3ZDMwNwWlRVdFl6aGtZUzAwT1RVeUxXSXlaR",        // Argo 隧道 Key
-  cfip: process.env.cfip || "argo.nzqk.cloudns.be",                                 // 优选 IP 域名
-  IP: process.env.IP || "127.0.0.1",                                                // 强制绑定本地 IP (防止被 Render 拦截)
-  scriptUrl: process.env.scriptUrl || "https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh", // 脚本下载地址
-  startDelay: process.env.startDelay ? parseInt(process.env.startDelay) : 15000,    // 守护进程延迟启动时间 (毫秒)
-  reconnectDelay: process.env.reconnectDelay ? parseInt(process.env.reconnectDelay) : 10000 // 守护进程重连延迟时间 (毫秒)
+  port: process.env.PORT || process.env.webPort || 3000,
+  vwpt: process.env.vwpt || "2086",
+  uuid: process.env.uuid || "80axxxxxx822a-84caee677810",
+  cdnym: process.env.cdnym || "argo.nzqk.clxxx.be",
+  argo: process.env.argo || "vwpt",
+  agn: process.env.agn || "argo.nzqk.cxxxs.be",
+  agk: process.env.agk || "eyJhIjoiZjY3ZDMwNwWlRVdFl6aGtZUzAwT1RVeUxXSXlaR1V0T1Rjd1pHTTNkyTkRkbSJ9",
+  cfip: process.env.cfip || "argo.nzqk.cloudns.be",
+  IP: process.env.IP || "127.0.0.1",
+  scriptUrl: process.env.scriptUrl || "https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh",
+  startDelay: process.env.startDelay ? parseInt(process.env.startDelay) : 15000,
+  reconnectDelay: process.env.reconnectDelay ? parseInt(process.env.reconnectDelay) : 10000
 };
-// ==================================================================================
+// ==========================================================
 
 const port = CONFIG.port;
 
@@ -40,16 +40,19 @@ const getShell = () => {
 // ==================== 内存监控与保活守护 ====================
 function logMemory() {
   const used = process.memoryUsage();
-  console.log('[System] 内存占用: RSS: ' + Math.round(used.rss / 1024 / 1024) + 'MB, Heap: ' + Math.round(used.heapUsed / 1024 / 1024) + 'MB');
+  // 打印内存,并在超过 45MB 时主动建议 V8 引擎进行垃圾回收
+  console.log('[System] Node RAM: ' + Math.round(used.rss / 1024 / 1024) + 'MB');
+  if (global.gc) {
+    global.gc();
+  }
 }
-setInterval(logMemory, 60000); // 每分钟在控制台打印一次内存情况
+setInterval(logMemory, 60000);
 
 let guardianProcess = null;
 function startGuardian() {
   const shellCmd = getShell();
-  console.log('[Guardian] 正在使用 ' + shellCmd + ' 启动保活脚本...');
+  console.log('[Guardian] 正在启动代理保活脚本...');
 
-  // 1. 动态生成环境变量对象 (全部读取 CONFIG)
   const envVars = {
     ...process.env,
     vwpt: CONFIG.vwpt,
@@ -62,7 +65,6 @@ function startGuardian() {
     IP: CONFIG.IP
   };
 
-  // 2. 动态拼接执行命令 (全部读取 CONFIG，100% 免疫混淆和翻译干扰)
   const command = 'vwpt="' + CONFIG.vwpt + '" ' +
                   'uuid="' + CONFIG.uuid + '" ' +
                   'cdnym="' + CONFIG.cdnym + '" ' +
@@ -74,28 +76,32 @@ function startGuardian() {
                   'bash <(curl -Ls ' + CONFIG.scriptUrl + ')';
 
   guardianProcess = spawn(shellCmd, ['-c', command], {
-    cwd: process.cwd(), // 切换回当前工作目录，解决 /tmp 的 noexec 限制
+    cwd: process.cwd(),
     env: envVars
   });
 
   guardianProcess.stdout.on('data', (data) => {
     const out = data.toString().trim();
-    if (out) console.log('[Guardian Output]: ' + out);
+    // 过滤掉无用的刷屏日志,减少 Node.js 内存占用
+    if (out && (out.includes('运行') || out.includes('成功') || out.includes('Tunnel'))) {
+      console.log('[Proxy]: ' + out);
+    }
   });
 
   guardianProcess.stderr.on('data', (data) => {
     const err = data.toString().trim();
-    if (err) console.error('[Guardian Error]: ' + err);
+    if (err && err.includes('Error')) {
+      console.error('[Proxy Error]: ' + err);
+    }
   });
 
   guardianProcess.on('close', (code) => {
-    console.log('[Guardian] 脚本进程已退出，退出码: ' + code + '。将在 ' + (CONFIG.reconnectDelay / 1000) + ' 秒后重新启动...');
+    console.log('[Guardian] 代理进程已关闭,代码: ' + code + '.将在 ' + (CONFIG.reconnectDelay / 1000) + ' 秒后重启...');
     guardianProcess = null;
     setTimeout(startGuardian, CONFIG.reconnectDelay);
   });
 }
 
-// 延迟启动守护进程
 setTimeout(startGuardian, CONFIG.startDelay);
 // ============================================================
 
