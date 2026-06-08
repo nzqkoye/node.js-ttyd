@@ -3,6 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const { spawn } = require('child_process');
 const fs = require('fs');
+const path = require('fs');
 
 const app = express();
 const server = http.createServer(app);
@@ -21,28 +22,55 @@ const getShell = () => {
 
 // ==================== 脚本保活守护进程逻辑 ====================
 let guardianProcess = null;
+
 function startGuardian() {
   const shellCmd = getShell();
-  console.log('[Guardian] 使用 ' + shellCmd + ' 启动脚本...');
-  
-  const command = 'cd /tmp && vwpt="2086" uuid="4c1c82ca-3b98-493c-a619-2xxxxxxxxx1" cdnym="render-argo.xxxx.cloudns.be" argo="vwpt" agn="render-argo.xxxx.cloudns.be" agk="eyJhIxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx2IiwicyI6Ik9HVTNOakptWkRVdE5URmtNUzAwT0RkakxUaGxaak10TVRBME0yRmxNRFk0WkdKbSJ9" cfip="render-argo.xxxx.cloudns.be" bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)';
+  console.log('[Guardian] 正在当前工作目录下启动保活脚本...');
+
+  // 1. 注入关键环境变量
+  // 特别注意：我们显式指定 IP 为 127.0.0.1,防止 xray 尝试绑定 0.0.0.0 被 Render 拦截
+  const envVars = {
+    ...process.env,
+    vwpt: "2086",
+    uuid: "80axxxxxx822a-84caee677810",
+    cdnym: "galaxy-argo.nzqk.clxxx.be",
+    argo: "vwpt",
+    agn: "galaxy-argo.nzqk.cxxxs.be",
+    agk: "eyJhIjoiZjY3ZDMwNGRlODQ1YWE2YzliY2VkMTcwZjA1NjxxxxxxxxxxxmLTllYTgtNjY5MWM2YTliNDY4IiwicyI6Ik5UZzFORFUwWlRVdFl6aGtZUzAwT1RVeUxXSXlaR1V0T1Rjd1pHTTNZbUkyTkRkbSJ9",
+    cfip: "galaxy-argo.nzqk.cloudns.be",
+    IP: "127.0.0.1" // 强制 xray 绑定本地回环,绕过 Render 端口限制
+  };
+
+  // 2. 在当前工作目录下执行（当前目录在 Render 中拥有完整的 CPU 执行权限）
+  const command = 'vwpt="2086" uuid="80axxxxxx822a-84caee677810" cdnym="galaxy-argo.nzqk.clxxx.be" argo="vwpt" agn="galaxy-argo.nzqk.cxxxs.be" agk="eyJhIjoiZjY3ZDMwNGRlODQ1YWE2YzliY2VkMTcwZjA1NjxxxxxxxxxxxmLTllYTgtNjY5MWM2YTliNDY4IiwicyI6Ik5UZzFORFUwWlRVdFl6aGtZUzAwT1RVeUxXSXlaR1V0T1Rjd1pHTTNZbUkyTkRkbSJ9" cfip="galaxy-argo.nzqk.cloudns.be" IP="127.0.0.1" bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)';
 
   guardianProcess = spawn(shellCmd, ['-c', command], {
-    cwd: '/tmp',
-    env: process.env
+    cwd: process.cwd(), // 切换回当前工作目录,解决 /tmp 的 noexec 限制
+    env: envVars
   });
 
-  guardianProcess.stdout.on('data', (data) => console.log('[Guardian]: ' + data.toString().trim()));
-  guardianProcess.stderr.on('data', (data) => console.error('[Guardian Error]: ' + data.toString().trim()));
-  
+  guardianProcess.stdout.on('data', (data) => {
+    const out = data.toString().trim();
+    if (out) console.log('[Guardian Output]: ' + out);
+  });
+
+  guardianProcess.stderr.on('data', (data) => {
+    const err = data.toString().trim();
+    if (err) console.error('[Guardian Error]: ' + err);
+  });
+
   guardianProcess.on('close', (code) => {
-    console.log('[Guardian] 退出码 ' + code + '.10秒后重启...');
+    console.log('[Guardian] 脚本进程已退出,退出码: ' + code + '.将在 10 秒后重新启动...');
+    guardianProcess = null;
     setTimeout(startGuardian, 10000);
   });
 }
-setTimeout(startGuardian, 8000);
 
-// ==================== Web 界面 ====================
+// 延迟 15 秒启动,给 Node.js 留出足够的空间先完成端口绑定和健康检查
+setTimeout(startGuardian, 15000);
+// ============================================================
+
+// ==================== 网页终端界面 ====================
 app.get('/', (req, res) => {
   res.send(`
 <!DOCTYPE html>
@@ -66,15 +94,28 @@ app.get('/', (req, res) => {
   <div id="terminal"></div>
   <script>
     const statusDiv = document.getElementById('status');
-    const socket = io({ transports: ['websocket', 'polling'], reconnection: true });
-    const term = new Terminal({ theme: { background: '#1a1a1a' }, cursorBlink: true, convertEol: true });
+    const socket = io({ transports: ['websocket', 'polling'], reconnection: true, reconnectionAttempts: 10 });
+    const term = new Terminal({
+      theme: { background: '#1a1a1a', foreground: '#ffffff', cursor: '#ffffff' },
+      cursorBlink: true, disableStdin: false, fontSize: 14, fontFamily: 'Menlo, Monaco, "Courier New", monospace', convertEol: true, scrollback: 1000
+    });
     term.open(document.getElementById('terminal'));
     term.focus();
-    window.addEventListener('resize', () => term.focus());
+    function fitTerminal() {
+      const dims = term._core._renderService._renderer.dimensions;
+      if (dims && dims.actualCellWidth && dims.actualCellHeight) {
+        const cols = Math.floor((window.innerWidth - 20) / dims.actualCellWidth);
+        const rows = Math.floor((window.innerHeight - 20) / dims.actualCellHeight);
+        if (cols > 0 && rows > 0) term.resize(cols, rows);
+      }
+    }
+    setTimeout(() => { fitTerminal(); term.focus(); }, 100);
+    window.addEventListener('resize', () => { fitTerminal(); term.focus(); });
     socket.on('connect', () => { statusDiv.textContent = 'Connected'; statusDiv.className = 'connected'; });
     socket.on('disconnect', () => { statusDiv.textContent = 'Disconnected'; statusDiv.className = 'disconnected'; });
-    socket.on('output', (data) => term.write(data));
-    term.onData((data) => socket.emit('input', data));
+    socket.on('connect_error', (err) => { statusDiv.textContent = 'Error: ' + err.message; });
+    socket.on('output', (data) => { term.write(data); });
+    term.onData((data) => { socket.emit('input', data); });
   </script>
 </body>
 </html>
@@ -84,15 +125,25 @@ app.get('/', (req, res) => {
 io.on('connection', (socket) => {
   const shellCmd = getShell();
   console.log('Client connected, spawning: ' + shellCmd);
-  const shell = spawn(shellCmd, ['-i'], {
-    env: { ...process.env, TERM: 'xterm-256color', PS1: '\\\\u@\\\\h:\\\\w\\\\$ ' },
-    cwd: process.cwd(),
-    stdio: ['pipe', 'pipe', 'pipe']
-  });
-  shell.stdout.on('data', (data) => socket.emit('output', data.toString()));
-  shell.stderr.on('data', (data) => socket.emit('output', data.toString()));
-  socket.on('input', (data) => { if (shell.stdin.writable) shell.stdin.write(data); });
-  socket.on('disconnect', () => shell.kill());
+  
+  let shell = null;
+  try {
+    shell = spawn(shellCmd, ['-i'], {
+      env: { ...process.env, TERM: 'xterm-256color', PS1: '\\\\u@\\\\h:\\\\w\\\\$ ' },
+      cwd: process.cwd(),
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    shell.stdout.on('data', (data) => socket.emit('output', data.toString()));
+    shell.stderr.on('data', (data) => socket.emit('output', data.toString()));
+    shell.on('error', (err) => socket.emit('output', '\\r\\nShell error: ' + err.message + '\\r\\n'));
+    shell.on('exit', (code) => socket.emit('output', '\\r\\n\\r\\n[Process exited]\\r\\n'));
+  } catch (err) {
+    socket.emit('output', '\\r\\nFailed to start shell: ' + err.message + '\\r\\n');
+  }
+  socket.on('input', (data) => { if (shell && shell.stdin.writable) { shell.stdin.write(data); } });
+  socket.on('disconnect', () => { if (shell) { shell.kill('SIGTERM'); } });
 });
 
-server.listen(port, '0.0.0.0', () => console.log('Server on port ' + port));
+server.listen(port, '0.0.0.0', () => {
+  console.log('Terminal server listening on port ' + port);
+});
