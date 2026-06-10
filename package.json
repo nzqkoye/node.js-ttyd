@@ -4,7 +4,8 @@
   "description": "Web Terminal for Wispbyte",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node --max-old-space-size=48 index.js",
+    "build": "npm install"
   },
   "engines": {
     "node": ">=18.0.0"
