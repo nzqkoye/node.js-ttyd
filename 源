@@ -52,13 +52,13 @@ function startGuardian() {
   // 1. 动态生成环境变量对象 (全部读取 CONFIG)
   const envVars = {
     ...process.env,
-    vwpt: CONFIG.vwpt,
-    uuid: CONFIG.uuid,
-    cdnym: CONFIG.cdnym,
-    argo: CONFIG.argo,
-    agn: CONFIG.agn,
-    agk: CONFIG.agk,
-    cfip: CONFIG.cfip,
+    VMPT: CONFIG.vwpt,
+    UUID: CONFIG.uuid,
+    CDNYM: CONFIG.cdnym,
+    ARGO: CONFIG.argo,
+    AGN: CONFIG.agn,
+    AGK: CONFIG.agk,
+    CFIP: CONFIG.cfip,
     IP: CONFIG.IP
   };
 
