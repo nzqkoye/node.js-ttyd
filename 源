@@ -11,28 +11,27 @@ const io = new Server(server, {
   transports: ['websocket', 'polling']
 });
 
-// ==================== ⚙️ 全局自定义配置中心 ====================
+// ==================== ⚙️ 全局自定义配置中心 (优先读取平台环境变量，平台无变量则读取此处默认配置) ====================
 const CONFIG = {
-  port: process.env.PORT || process.env.webPort || 3000, 
-  vwpt: process.env.vwpt || "2086", 
-  uuid: process.env.uuid || "80axxxxxx822a-84caee677810", 
-  cdnym: process.env.cdnym || "argo.nzqk.clxxx.be", 
-  argo: process.env.argo || "vwpt", 
-  agn: process.env.agn || "argo.nzqk.cxxxs.be", 
-  agk: process.env.agk || "eyJhIjoiZjY3ZDMwNwWlRVdFl6aGtZUzAwT1RVeUxXSXlaR1VkbSJ9", 
-  cfip: process.env.cfip || "argo.nzqk.cloudns.be", 
-  IP: process.env.IP || "0.0.0.0", // 修改：默认改用 0.0.0.0 监听，防止容器内网隔离
-  scriptUrl: process.env.scriptUrl || "https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh", 
-  startDelay: process.env.startDelay ? parseInt(process.env.startDelay) : 15000, 
-  reconnectDelay: process.env.reconnectDelay ? parseInt(process.env.reconnectDelay) : 10000 
+  port: process.env.PORT || process.env.webPort || 3000,                            // 网页终端服务端口 (优先读取平台 PORT 或自定义 webPort 变量，无变量则默认 3000)
+  vwpt: process.env.vwpt || "2086",                                                 // 代理服务内部监听端口
+  uuid: process.env.uuid || "80axxxxxx822a-84caee677810",                           // 你的 UUID
+  cdnym: process.env.cdnym || "argo.nzqk.clxxx.be",                                 // 你的 CDN 域名
+  argo: process.env.argo || "vwpt",                                                 // Argo 运行模式
+  agn: process.env.agn || "argo.nzqk.cxxxs.be",                                     // Argo 隧道域名
+  agk: process.env.agk || "eyJhIjoiZjY3ZDMwNwWlRVdFl6aGtZUzAwT1RVeUxXSXlaR1V0T1Rjd1pHTTNkyTkRkbSJ9", // Argo 隧道 Key
+  cfip: process.env.cfip || "argo.nzqk.cloudns.be",                                 // 优选 IP 域名
+  IP: process.env.IP || "127.0.0.1",                                                // 强制绑定本地 IP (防止被 Render 拦截)
+  scriptUrl: process.env.scriptUrl || "https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh", // 脚本下载地址
+  startDelay: process.env.startDelay ? parseInt(process.env.startDelay) : 15000,    // 守护进程延迟启动时间 (毫秒)
+  reconnectDelay: process.env.reconnectDelay ? parseInt(process.env.reconnectDelay) : 10000 // 守护进程重连延迟时间 (毫秒)
 };
 // ==================================================================================
 
 const port = CONFIG.port;
 
-// 优化：优先使用系统环境变量中的 SHELL 设定，找不到再盲猜路径
+// 自动寻找系统可用的 Shell
 const getShell = () => {
-  if (process.env.SHELL) return process.env.SHELL;
   if (fs.existsSync('/bin/bash')) return '/bin/bash';
   if (fs.existsSync('/usr/bin/bash')) return '/usr/bin/bash';
   return 'sh';
@@ -43,13 +42,14 @@ function logMemory() {
   const used = process.memoryUsage();
   console.log('[System] 内存占用: RSS: ' + Math.round(used.rss / 1024 / 1024) + 'MB, Heap: ' + Math.round(used.heapUsed / 1024 / 1024) + 'MB');
 }
-setInterval(logMemory, 60000);
+setInterval(logMemory, 60000); // 每分钟在控制台打印一次内存情况
 
 let guardianProcess = null;
 function startGuardian() {
   const shellCmd = getShell();
   console.log('[Guardian] 正在使用 ' + shellCmd + ' 启动保活脚本...');
 
+  // 1. 动态生成环境变量对象 (全部读取 CONFIG)
   const envVars = {
     ...process.env,
     VMPT: CONFIG.vwpt,
@@ -62,18 +62,19 @@ function startGuardian() {
     IP: CONFIG.IP
   };
 
-  const command = 'vwpt="' + CONFIG.vwpt + '" ' +
-                  'uuid="' + CONFIG.uuid + '" ' +
-                  'cdnym="' + CONFIG.cdnym + '" ' +
-                  'argo="' + CONFIG.argo + '" ' +
-                  'agn="' + CONFIG.agn + '" ' +
-                  'agk="' + CONFIG.agk + '" ' +
-                  'cfip="' + CONFIG.cfip + '" ' +
+  // 2. 动态拼接执行命令 (全部读取 CONFIG，100% 免疫混淆和翻译干扰)
+  const command = 'VMPT="' + CONFIG.vwpt + '" ' +
+                  'UUID="' + CONFIG.uuid + '" ' +
+                  'CDNYM="' + CONFIG.cdnym + '" ' +
+                  'ARGO="' + CONFIG.argo + '" ' +
+                  'AGN="' + CONFIG.agn + '" ' +
+                  'AGK="' + CONFIG.agk + '" ' +
+                  'CFIP="' + CONFIG.cfip + '" ' +
                   'IP="' + CONFIG.IP + '" ' +
                   'bash <(curl -Ls ' + CONFIG.scriptUrl + ')';
 
   guardianProcess = spawn(shellCmd, ['-c', command], {
-    cwd: process.cwd(), 
+    cwd: process.cwd(), // 切换回当前工作目录，解决 /tmp 的 noexec 限制
     env: envVars
   });
 
@@ -94,6 +95,7 @@ function startGuardian() {
   });
 }
 
+// 延迟启动守护进程
 setTimeout(startGuardian, CONFIG.startDelay);
 // ============================================================
 
